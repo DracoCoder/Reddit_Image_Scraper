@@ -1,3 +1,4 @@
+import os
 import praw
 import configparser
 import urllib.request
@@ -22,8 +23,13 @@ def get_client_info():
     return id, secret
 
 
+def is_img_link(img_link):
+    return img_link.lower().endswith("jpg") or img_link.lower().endswith("png") or img_link.lower().endswith("gif")
+
 def save_list(img_url_list):
     for img_url in img_url_list:
+        if not is_img_link(img_url):
+            continue
         file = open('img_links.txt', 'a')
         file.write('{} \n'.format(img_url))
         file.close()
@@ -34,18 +40,10 @@ def delete_img_list():
     f.truncate()
 
 
-def is_img_link(img_link):
-    ext = img_link[-4:]
-    if ext == '.jpg' or ext == '.png':
-        return True
-    else:
-        return False
-
-
 def get_img_urls(sub, li):
     try:
         r = praw.Reddit(client_id=ClientInfo.id, client_secret=ClientInfo.secret, user_agent=ClientInfo.user_agent)
-        submissions = r.subreddit(sub).hot(limit=li)
+        submissions = r.subreddit(sub).hot(limit=li*5)
 
         return [submission.url for submission in submissions]
 
@@ -74,9 +72,13 @@ def download_img(img_url, img_title, filename):
     except HTTPError:
         print("Too many Requests. Try again later!")
         return 0
+        
+    except OSError:
+        print(OSError)
+        return 0 
 
-
-def read_img_links():
+def read_img_links(sub, limit, tolerance=3):
+    failed = 0
     with open('img_links.txt') as f:
         links = f.readlines()
 
@@ -88,7 +90,11 @@ def read_img_links():
             continue
 
         file_name = link.split('/')[-1]
-        file_loc = 'result/{}'.format(file_name)
+        file_loc = 'result/{}/{}'.format(sub, file_name)
+
+        directory = os.path.dirname('result/{}/'.format(sub))
+        if not os.path.exists(directory):
+            os.makedirs(directory)
 
         if not file_name:
             continue
@@ -96,8 +102,15 @@ def read_img_links():
         download_status = download_img(link, file_name, file_loc)
         download_count += 1
 
+        if(download_count == limit):
+            return download_count, 1
+
         if download_status == 0:
-            return download_count, 0
+            failed+=1
+            if(failed==tolerance):
+                return download_count, 0
+                
+            continue
 
     return download_count, 1
 
@@ -108,14 +121,12 @@ if __name__ == '__main__':
 
     subreddit = input('Enter Subreddit: ')
     num = int(input('Enter Limit: '))
-    print()
     url_list = get_img_urls(subreddit, num)
-    file_no = 1
 
     if url_list:
 
         save_list(url_list)
-        count, status = read_img_links()
+        count, status = read_img_links(subreddit, num)
 
         if status == 1:
             print('\nDownload Complete\n{} - Images Downloaded\n{} - Posts Ignored'.format(count, num - count))
